@@ -34,3 +34,8 @@ ImageDraw.Draw(out).text((tx, ty), text, fill=(255, 255, 255, 255), font=font)
 OUT.parent.mkdir(parents=True, exist_ok=True)
 out.save(OUT, format="PNG")
 print(f"wrote {OUT} ({OUT.stat().st_size} bytes)")
+
+# Also write a multi-resolution .ico for Windows shortcuts
+ICO_OUT = OUT.with_suffix(".ico")
+out.save(ICO_OUT, format="ICO", sizes=[(16, 16), (32, 32), (48, 48), (64, 64)])
+print(f"wrote {ICO_OUT} ({ICO_OUT.stat().st_size} bytes)")

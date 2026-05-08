@@ -145,7 +145,7 @@ class App:
             self.bridge.show_text.emit(reply)
             try:
                 audio = await self.tts.synthesize(_strip_markdown(reply))
-                await asyncio.get_event_loop().run_in_executor(None, self.player.play, audio)
+                asyncio.get_event_loop().run_in_executor(None, self.player.play, audio)
             except Exception:
                 pass
         finally:

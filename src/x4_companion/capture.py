@@ -8,10 +8,11 @@ class Capture(ABC):
         """Return PNG-encoded bytes of the current screen."""
 
 class DxcamCapture(Capture):
-    def __init__(self, max_width: int = 1280):
+    def __init__(self, max_width: int = 896, jpeg_quality: int = 80):
         import dxcam
         self._camera = dxcam.create()
         self._max_width = max_width
+        self._jpeg_quality = jpeg_quality
 
     def get_current_frame(self) -> bytes:
         frame = self._camera.grab()
@@ -22,7 +23,7 @@ class DxcamCapture(Capture):
             ratio = self._max_width / img.width
             img = img.resize((self._max_width, int(img.height * ratio)))
         buf = io.BytesIO()
-        img.save(buf, format="PNG", optimize=True)
+        img.save(buf, format="JPEG", quality=self._jpeg_quality, optimize=True)
         return buf.getvalue()
 
 class FakeCapture(Capture):

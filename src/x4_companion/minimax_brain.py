@@ -38,8 +38,9 @@ class MiniMaxBrain(Brain):
             prompt += VKB_PREAMBLE + vkb_bindings
         self._system_prompt = prompt
 
-    async def answer(self, frame_png: bytes, query: str) -> str:
-        img_b64 = base64.b64encode(frame_png).decode()
+    async def answer(self, frame: bytes, query: str) -> str:
+        img_b64 = base64.b64encode(frame).decode()
+        mime = "image/jpeg" if frame[:3] == b"\xff\xd8\xff" else "image/png"
         parts = [self._system_prompt]
         history_text = self._history.as_text()
         if history_text:
@@ -49,7 +50,7 @@ class MiniMaxBrain(Brain):
         r = await self._client.post(
             self.URL,
             headers={"Authorization": f"Bearer {self._api_key}"},
-            json={"prompt": prompt, "image_url": f"data:image/png;base64,{img_b64}"},
+            json={"prompt": prompt, "image_url": f"data:{mime};base64,{img_b64}"},
         )
         r.raise_for_status()
         reply = r.json()["content"]
