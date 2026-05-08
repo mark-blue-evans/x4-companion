@@ -33,6 +33,7 @@ KEYBOARD_DEFAULTS_PATH = Path(__file__).parent / "data" / "x4_keyboard_defaults.
 
 BRAIN_OPTIONS: list[tuple[str, str]] = [
     ("openai", "OpenAI (GPT-5 nano)"),
+    ("openai_web", "OpenAI + Web (GPT-5 nano)"),
     ("minimax", "MiniMax (M2.7)"),
 ]
 
@@ -363,13 +364,23 @@ def main() -> int:
     vkb = _load_vkb_bindings()
     brains: dict[str, Brain] = {}
     if cfg.secrets.openai_api_key:
+        kbd = _load_keyboard_defaults()
         brains["openai"] = OpenAIBrain(
             api_key=cfg.secrets.openai_api_key,
             model=cfg.brain.openai_model,
             history_turns=cfg.brain.history_turns,
             vkb_bindings=vkb,
-            keyboard_defaults=_load_keyboard_defaults(),
-            web_search=cfg.brain.web_search,
+            keyboard_defaults=kbd,
+            web_search=False,
+            reasoning_effort=cfg.brain.openai_reasoning_effort,
+        )
+        brains["openai_web"] = OpenAIBrain(
+            api_key=cfg.secrets.openai_api_key,
+            model=cfg.brain.openai_model,
+            history_turns=cfg.brain.history_turns,
+            vkb_bindings=vkb,
+            keyboard_defaults=kbd,
+            web_search=True,
             reasoning_effort=cfg.brain.openai_reasoning_effort,
         )
     if cfg.secrets.minimax_api_key:
