@@ -1,4 +1,5 @@
 import base64
+import datetime
 import httpx
 from .brain import Brain, ConversationHistory
 
@@ -41,7 +42,8 @@ class MiniMaxBrain(Brain):
     async def answer(self, frame: bytes, query: str) -> str:
         img_b64 = base64.b64encode(frame).decode()
         mime = "image/jpeg" if frame[:3] == b"\xff\xd8\xff" else "image/png"
-        parts = [self._system_prompt]
+        now = datetime.datetime.now().strftime("%A, %Y-%m-%d %H:%M %Z").strip()
+        parts = [self._system_prompt, f"Today is {now}."]
         history_text = self._history.as_text()
         if history_text:
             parts.append(history_text)

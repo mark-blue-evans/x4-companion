@@ -21,10 +21,13 @@ class VoiceConfig:
 
 @dataclass
 class BrainConfig:
-    provider: str = "minimax"
+    default: str = "openai"
     model: str = "MiniMax-M2.7"
+    openai_model: str = "gpt-5-nano"
+    openai_reasoning_effort: str = "minimal"
     image_understanding: bool = True
     history_turns: int = 6
+    web_search: bool = False
 
 @dataclass
 class OverlayConfig:
@@ -37,6 +40,7 @@ class OverlayConfig:
 class Secrets:
     minimax_api_key: str = ""
     deepgram_api_key: str = ""
+    openai_api_key: str = ""
 
 @dataclass
 class Config:
@@ -60,5 +64,6 @@ def load_config(path: Path = DEFAULT_PATH) -> Config:
         secrets=Secrets(
             minimax_api_key=os.environ.get("MINIMAX_API_KEY", ""),
             deepgram_api_key=os.environ.get("DEEPGRAM_API_KEY", ""),
+            openai_api_key=os.environ.get("OPENAI_API_KEY", ""),
         ),
     )
