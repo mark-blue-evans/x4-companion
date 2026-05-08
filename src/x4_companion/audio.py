@@ -1,6 +1,8 @@
 import io
+
 import numpy as np
 import soundfile as sf
+
 
 class AudioRecorder:
     def __init__(self, sample_rate: int = 16000, device: str | int | None = None):
@@ -13,8 +15,10 @@ class AudioRecorder:
 
     def start(self) -> None:
         self._chunks = []
+
         def callback(indata, frames, time, status):
             self._chunks.append(indata.copy())
+
         self._stream = self._sd.InputStream(
             samplerate=self._sample_rate,
             channels=1,
@@ -36,6 +40,7 @@ class AudioRecorder:
         sf.write(buf, audio, self._sample_rate, format="WAV", subtype="PCM_16")
         return buf.getvalue()
 
+
 class AudioPlayer:
     def __init__(self, sample_rate: int = 24000, device: str | int | None = None):
         import sounddevice as sd
@@ -43,9 +48,31 @@ class AudioPlayer:
         self._sample_rate = sample_rate
         self._device = device or None
 
-    def play(self, pcm_bytes: bytes) -> None:
+    def open_stream(self) -> "StreamingPlayback":
+        return StreamingPlayback(self._sd, self._sample_rate, self._device or None)
+
+
+class StreamingPlayback:
+    """Write linear16 PCM bytes as they arrive; audio plays as soon as the
+    output buffer has enough samples."""
+
+    def __init__(self, sd, sample_rate: int, device):
+        self._sd = sd
+        self._stream = sd.RawOutputStream(
+            samplerate=sample_rate,
+            channels=1,
+            dtype="int16",
+            device=device,
+        )
+        self._stream.start()
+
+    def write(self, pcm_bytes: bytes) -> None:
         if not pcm_bytes or pcm_bytes == b"PCM_FAKE":
             return
-        audio = np.frombuffer(pcm_bytes, dtype=np.int16)
-        self._sd.play(audio, samplerate=self._sample_rate, device=self._device)
-        self._sd.wait()
+        self._stream.write(pcm_bytes)
+
+    def close(self) -> None:
+        try:
+            self._stream.stop()
+        finally:
+            self._stream.close()

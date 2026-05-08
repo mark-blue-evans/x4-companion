@@ -1,35 +1,47 @@
 from abc import ABC, abstractmethod
-import httpx
+from typing import AsyncIterator
+
+from deepgram import AsyncDeepgramClient
+from deepgram.speak.v1.types import SpeakV1Text
+
 
 class TTS(ABC):
     @abstractmethod
-    async def synthesize(self, text: str) -> bytes: ...
+    def stream(self, text: str) -> AsyncIterator[bytes]:
+        """Yield raw PCM audio chunks (linear16, mono) as they arrive."""
+
 
 class DeepgramTTS(TTS):
-    def __init__(self, api_key: str, model: str = "aura-2-thalia-en"):
-        self._api_key = api_key
+    def __init__(
+        self,
+        api_key: str,
+        model: str = "aura-2-thalia-en",
+        sample_rate: int = 24000,
+    ):
         self._model = model
-        self._client = httpx.AsyncClient(timeout=30.0)
+        self._sample_rate = sample_rate
+        self._client = AsyncDeepgramClient(api_key=api_key)
 
-    async def synthesize(self, text: str) -> bytes:
-        url = (
-            f"https://api.deepgram.com/v1/speak"
-            f"?model={self._model}&encoding=linear16&sample_rate=24000"
-        )
-        r = await self._client.post(
-            url,
-            headers={
-                "Authorization": f"Token {self._api_key}",
-                "Content-Type": "application/json",
-            },
-            json={"text": text},
-        )
-        r.raise_for_status()
-        return r.content
+    async def stream(self, text: str) -> AsyncIterator[bytes]:
+        async with self._client.speak.v1.connect(
+            model=self._model,
+            encoding="linear16",
+            sample_rate=self._sample_rate,
+        ) as ws:
+            await ws.send_text(SpeakV1Text(text=text))
+            await ws.send_flush()
+            async for msg in ws:
+                if isinstance(msg, bytes):
+                    yield msg
+                elif getattr(msg, "type", None) == "Flushed":
+                    break
+            await ws.send_close()
 
-    async def aclose(self) -> None:
-        await self._client.aclose()
 
 class StubTTS(TTS):
-    async def synthesize(self, text: str) -> bytes:
-        return b"PCM_FAKE"
+    def __init__(self, chunks: list[bytes] | None = None):
+        self._chunks = chunks or [b"PCM_FAKE"]
+
+    async def stream(self, text: str) -> AsyncIterator[bytes]:
+        for chunk in self._chunks:
+            yield chunk

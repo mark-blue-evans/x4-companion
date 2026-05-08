@@ -91,6 +91,7 @@ class App:
         self._loop = asyncio.new_event_loop()
         self._loop_thread = threading.Thread(target=self._run_loop, daemon=True)
         self._busy = False
+        self._playback_task: asyncio.Task | None = None
 
     def _run_loop(self) -> None:
         asyncio.set_event_loop(self._loop)
@@ -122,6 +123,8 @@ class App:
             return
         self._busy = True
         self.bridge.show_text.emit("(thinking...)")
+        if self._playback_task and not self._playback_task.done():
+            self._loop.call_soon_threadsafe(self._playback_task.cancel)
         asyncio.run_coroutine_threadsafe(self._handle_turn(wav, frame), self._loop)
 
     async def _handle_turn(self, wav: bytes, frame: bytes) -> None:
@@ -143,13 +146,29 @@ class App:
                 self.bridge.show_text.emit(f"(brain error: {e})")
                 return
             self.bridge.show_text.emit(reply)
-            try:
-                audio = await self.tts.synthesize(_strip_markdown(reply))
-                asyncio.get_event_loop().run_in_executor(None, self.player.play, audio)
-            except Exception:
-                pass
+            self._playback_task = asyncio.create_task(
+                self._stream_audio(_strip_markdown(reply))
+            )
         finally:
             self._busy = False
+
+    async def _stream_audio(self, text: str) -> None:
+        if not text:
+            return
+        loop = asyncio.get_event_loop()
+        try:
+            playback = await loop.run_in_executor(None, self.player.open_stream)
+        except Exception:
+            return
+        try:
+            async for chunk in self.tts.stream(text):
+                await loop.run_in_executor(None, playback.write, chunk)
+        except asyncio.CancelledError:
+            raise
+        except Exception:
+            pass
+        finally:
+            await loop.run_in_executor(None, playback.close)
 
     def run(self) -> int:
         self._loop_thread.start()
@@ -162,6 +181,8 @@ class App:
             self.hotkey.stop()
         except Exception:
             pass
+        if self._playback_task and not self._playback_task.done():
+            self._loop.call_soon_threadsafe(self._playback_task.cancel)
         for client in (self.brain, self.tts):
             aclose = getattr(client, "aclose", None)
             if aclose is None:
