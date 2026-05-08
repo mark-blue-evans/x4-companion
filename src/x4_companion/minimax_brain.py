@@ -6,7 +6,9 @@ BASE_SYSTEM_PROMPT = (
     "You are an experienced X4 Foundations player sitting next to the user as they play. "
     "You can see their screen. Answer questions concisely and conversationally. "
     "Keep replies under 60 words unless the user explicitly asks for detail. "
-    "If the screenshot is unclear, say so rather than guessing."
+    "If the screenshot is unclear, say so rather than guessing. "
+    "Reply in plain text only — no markdown, no asterisks for emphasis, no bullet "
+    "lists. Your reply will be read aloud, so write the way you'd speak."
 )
 
 VKB_PREAMBLE = (
@@ -19,18 +21,16 @@ VKB_PREAMBLE = (
 )
 
 class MiniMaxBrain(Brain):
-    URL = "https://api.minimax.io/v1/text/chatcompletion_v2"
+    URL = "https://api.minimax.io/v1/coding_plan/vlm"
 
     def __init__(
         self,
         api_key: str,
-        model: str = "MiniMax-M2.7",
         history_turns: int = 6,
         timeout: float = 60.0,
         vkb_bindings: str | None = None,
     ):
         self._api_key = api_key
-        self._model = model
         self._history = ConversationHistory(max_turns=history_turns)
         self._client = httpx.AsyncClient(timeout=timeout)
         prompt = BASE_SYSTEM_PROMPT
@@ -40,25 +40,19 @@ class MiniMaxBrain(Brain):
 
     async def answer(self, frame_png: bytes, query: str) -> str:
         img_b64 = base64.b64encode(frame_png).decode()
-        prior = self._history.as_messages()
-        messages = [
-            {"role": "system", "content": self._system_prompt},
-            *prior,
-            {
-                "role": "user",
-                "content": [
-                    {"type": "text", "text": query},
-                    {"type": "image_url", "image_url": {"url": f"data:image/png;base64,{img_b64}"}},
-                ],
-            },
-        ]
+        parts = [self._system_prompt]
+        history_text = self._history.as_text()
+        if history_text:
+            parts.append(history_text)
+        parts.append(f"user: {query}")
+        prompt = "\n\n".join(parts)
         r = await self._client.post(
             self.URL,
             headers={"Authorization": f"Bearer {self._api_key}"},
-            json={"model": self._model, "messages": messages},
+            json={"prompt": prompt, "image_url": f"data:image/png;base64,{img_b64}"},
         )
         r.raise_for_status()
-        reply = r.json()["choices"][0]["message"]["content"]
+        reply = r.json()["content"]
         self._history.append_user(query)
         self._history.append_assistant(reply)
         return reply

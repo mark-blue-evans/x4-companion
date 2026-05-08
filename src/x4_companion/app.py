@@ -21,6 +21,10 @@ from .tts import TTS, DeepgramTTS
 VKB_BINDINGS_PATH = Path(__file__).parent / "data" / "vkb_bindings.md"
 
 
+def _strip_markdown(text: str) -> str:
+    return text.replace("**", "").replace("`", "").replace("*", "")
+
+
 def _load_dotenv(path: Path) -> None:
     """Minimal .env loader. Existing env vars take precedence."""
     if not path.exists():
@@ -100,6 +104,8 @@ class App:
             self.recorder.start()
         except Exception as e:
             self.bridge.show_text.emit(f"(mic error: {e})")
+            return
+        self.bridge.show_text.emit("(listening...)")
 
     def _on_ptt_up(self) -> None:
         if self._busy:
@@ -115,6 +121,7 @@ class App:
             self.bridge.show_text.emit(f"(capture failed: {e})")
             return
         self._busy = True
+        self.bridge.show_text.emit("(thinking...)")
         asyncio.run_coroutine_threadsafe(self._handle_turn(wav, frame), self._loop)
 
     async def _handle_turn(self, wav: bytes, frame: bytes) -> None:
@@ -137,7 +144,7 @@ class App:
                 return
             self.bridge.show_text.emit(reply)
             try:
-                audio = await self.tts.synthesize(reply)
+                audio = await self.tts.synthesize(_strip_markdown(reply))
                 await asyncio.get_event_loop().run_in_executor(None, self.player.play, audio)
             except Exception:
                 pass
@@ -178,7 +185,6 @@ def main() -> int:
     capture = DxcamCapture()
     brain = MiniMaxBrain(
         api_key=cfg.secrets.minimax_api_key,
-        model=cfg.brain.model,
         history_turns=cfg.brain.history_turns,
         vkb_bindings=_load_vkb_bindings(),
     )

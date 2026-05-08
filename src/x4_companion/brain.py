@@ -20,6 +20,9 @@ class ConversationHistory:
     def as_messages(self) -> list[dict]:
         return [{"role": t.role, "content": t.content} for t in self._turns]
 
+    def as_text(self) -> str:
+        return "\n".join(f"{t.role}: {t.content}" for t in self._turns)
+
 class Brain(ABC):
     @abstractmethod
     async def answer(self, frame_png: bytes, query: str) -> str: ...
