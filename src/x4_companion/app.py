@@ -10,7 +10,7 @@ from PySide6.QtCore import QObject, Signal
 from PySide6.QtWidgets import QApplication
 
 from .audio import AudioPlayer, AudioRecorder
-from .brain import Brain
+from .brain import Brain, ProposedAction
 from .capture import Capture, DxcamCapture
 from .config import Config, load_config
 from .hotkey import Hotkey
@@ -20,14 +20,21 @@ from .overlay import Overlay
 from .stt import STT, DeepgramSTT
 from .tray import Tray
 from .tts import TTS, DeepgramTTS
+from .x4_actions import execute_action
+from .x4_inputmap import (
+    find_user_inputmap,
+    format_bindings_markdown,
+    format_synonym_table,
+    parse_inputmap,
+)
+
+VKB_BINDINGS_PATH = Path(__file__).parent / "data" / "vkb_bindings.md"
+KEYBOARD_DEFAULTS_PATH = Path(__file__).parent / "data" / "x4_keyboard_defaults.md"
 
 BRAIN_OPTIONS: list[tuple[str, str]] = [
     ("openai", "OpenAI (GPT-5 nano)"),
     ("minimax", "MiniMax (M2.7)"),
 ]
-
-VKB_BINDINGS_PATH = Path(__file__).parent / "data" / "vkb_bindings.md"
-
 
 def _strip_markdown(text: str) -> str:
     return text.replace("**", "").replace("`", "").replace("*", "")
@@ -67,7 +74,47 @@ def _setup_logging() -> None:
 def _load_vkb_bindings() -> str | None:
     if not VKB_BINDINGS_PATH.exists():
         return None
-    return VKB_BINDINGS_PATH.read_text()
+    return VKB_BINDINGS_PATH.read_text(encoding="utf-8")
+
+
+def _load_keyboard_defaults() -> str | None:
+    """Prefer the user's actual X4 inputmap.xml; fall back to vendored defaults."""
+    inputmap_path = find_user_inputmap()
+    if inputmap_path is not None:
+        bindings = parse_inputmap(inputmap_path)
+        if bindings:
+            log.info(
+                "loaded %d X4 keyboard bindings from %s",
+                len(bindings),
+                inputmap_path,
+            )
+            synonyms = format_synonym_table(bindings)
+            full_list = format_bindings_markdown(bindings)
+            return (
+                f"Source: parsed from {inputmap_path}.\n"
+                "\n"
+                "WARNING — IGNORE THE SCREENSHOT WHEN PICKING KEYS.\n"
+                "X4's UI shows hints like 'Press 1 to open SHIP MENU', but "
+                "that '1' is the user's VKB controller — NOT the keyboard. "
+                "Pressing keyboard '1' will NOT open the ship menu. ALWAYS "
+                "use the bindings below (parsed from the user's actual X4 "
+                "settings).\n"
+                "\n"
+                "## Common natural-language phrasings → keyboard key\n"
+                "If the user's request matches any of these, use the listed "
+                "key. Match flexibly (e.g., 'open the ship menu' matches "
+                "'open ship menu').\n"
+                f"\n{synonyms}\n"
+                "\n"
+                "## Full parsed binding list (fallback)\n"
+                "If the request doesn't match the synonym table, search "
+                "this list for the most likely action.\n"
+                f"\n{full_list}\n"
+            )
+        log.warning("inputmap at %s parsed empty, falling back", inputmap_path)
+    if not KEYBOARD_DEFAULTS_PATH.exists():
+        return None
+    return KEYBOARD_DEFAULTS_PATH.read_text(encoding="utf-8")
 
 
 class _Bridge(QObject):
@@ -124,8 +171,8 @@ class App:
 
         self._loop = asyncio.new_event_loop()
         self._loop_thread = threading.Thread(target=self._run_loop, daemon=True)
-        self._busy = False
         self._playback_task: asyncio.Task | None = None
+        self._turn_task: asyncio.Task | None = None
 
     @property
     def brain(self) -> Brain:
@@ -143,10 +190,12 @@ class App:
         self._loop.run_forever()
 
     def _on_ptt_down(self) -> None:
-        if self._busy:
-            self.bridge.show_text.emit("(still thinking...)")
-            log.info("ptt_down ignored — still busy")
-            return
+        cancelled_turn = False
+        if self._turn_task and not self._turn_task.done():
+            self._loop.call_soon_threadsafe(self._turn_task.cancel)
+            cancelled_turn = True
+        if self._playback_task and not self._playback_task.done():
+            self._loop.call_soon_threadsafe(self._playback_task.cancel)
         try:
             self.recorder.start()
         except Exception as e:
@@ -154,11 +203,12 @@ class App:
             log.error("mic error on ptt_down: %s", e)
             return
         self.bridge.show_text.emit("(listening...)")
-        log.info("ptt_down — recording started")
+        if cancelled_turn:
+            log.info("ptt_down — interrupted in-flight turn, recording new")
+        else:
+            log.info("ptt_down — recording started")
 
     def _on_ptt_up(self) -> None:
-        if self._busy:
-            return
         try:
             wav = self.recorder.stop()
         except Exception as e:
@@ -178,13 +228,11 @@ class App:
             len(frame),
             time.monotonic() - t_capture,
         )
-        self._busy = True
         self.bridge.show_text.emit("(thinking...)")
-        if self._playback_task and not self._playback_task.done():
-            self._loop.call_soon_threadsafe(self._playback_task.cancel)
         asyncio.run_coroutine_threadsafe(self._handle_turn(wav, frame), self._loop)
 
     async def _handle_turn(self, wav: bytes, frame: bytes) -> None:
+        self._turn_task = asyncio.current_task()
         t_turn = time.monotonic()
         try:
             if not wav or len(wav) < 4000:
@@ -202,6 +250,7 @@ class App:
             if not transcript.strip():
                 self.bridge.show_text.emit("(didn't catch that)")
                 return
+
             t = time.monotonic()
             try:
                 reply = await self.brain.answer(frame, transcript)
@@ -210,18 +259,43 @@ class App:
                 log.error("brain (%s) error: %s", self.active_brain, e)
                 return
             log.info(
-                "brain %s %.2fs — %r",
+                "brain %s %.2fs — %r%s",
                 self.active_brain,
                 time.monotonic() - t,
-                reply[:120] + ("..." if len(reply) > 120 else ""),
+                reply.text[:120],
+                " ..." if len(reply.text) > 120 else "",
             )
-            self.bridge.show_text.emit(reply)
+            if reply.pending_action:
+                log.info(
+                    "auto-executing %s — keys=%s",
+                    reply.pending_action.name,
+                    list(reply.pending_action.keys),
+                )
+                asyncio.create_task(self._execute_action(reply.pending_action))
+            self.bridge.show_text.emit(reply.text)
             self._playback_task = asyncio.create_task(
-                self._stream_audio(_strip_markdown(reply), t_turn)
+                self._stream_audio(_strip_markdown(reply.text), t_turn)
             )
+        except asyncio.CancelledError:
+            log.info("turn cancelled by new ptt_down at %.2fs", time.monotonic() - t_turn)
+            raise
         finally:
-            self._busy = False
+            if self._turn_task is asyncio.current_task():
+                self._turn_task = None
             log.info("turn done in %.2fs (audio still streaming)", time.monotonic() - t_turn)
+
+    async def _execute_action(self, action: ProposedAction) -> None:
+        loop = asyncio.get_event_loop()
+        ok, msg = await loop.run_in_executor(None, execute_action, action)
+        log.info(
+            "execute %s keys=%s -> ok=%s msg=%s",
+            action.name,
+            list(action.keys),
+            ok,
+            msg,
+        )
+        if not ok:
+            self.bridge.show_text.emit(f"(action failed: {msg})")
 
     async def _stream_audio(self, text: str, t_turn: float) -> None:
         if not text:
@@ -294,6 +368,7 @@ def main() -> int:
             model=cfg.brain.openai_model,
             history_turns=cfg.brain.history_turns,
             vkb_bindings=vkb,
+            keyboard_defaults=_load_keyboard_defaults(),
             web_search=cfg.brain.web_search,
             reasoning_effort=cfg.brain.openai_reasoning_effort,
         )

@@ -14,7 +14,8 @@ async def test_minimax_brain_calls_api_with_image_and_query():
     )
     brain = MiniMaxBrain(api_key="mm-test")
     reply = await brain.answer(b"PNGBYTES", "what is this?")
-    assert reply == "That's a Teladi station."
+    assert reply.text == "That's a Teladi station."
+    assert reply.pending_action is None
     body = route.calls.last.request.read().decode()
     assert "what is this?" in body
     assert "data:image/png;base64," in body

@@ -6,7 +6,7 @@ def test_defaults_when_no_file(tmp_path, monkeypatch):
     cfg = load_config(tmp_path / "missing.toml")
     assert cfg.hotkey.key == "home"
     assert cfg.brain.model == "MiniMax-M2.7"
-    assert cfg.brain.history_turns == 6
+    assert cfg.brain.history_turns == 12
     assert cfg.overlay.opacity == 0.85
     assert cfg.secrets.minimax_api_key == "mm-test"
     assert cfg.secrets.deepgram_api_key == "dg-test"

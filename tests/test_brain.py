@@ -22,6 +22,7 @@ def test_history_drops_oldest_when_full():
 async def test_stub_brain_returns_canned_reply_and_records_inputs():
     b = StubBrain(reply="canned")
     out = await b.answer(b"PNGBYTES", "what is this?")
-    assert out == "canned"
+    assert out.text == "canned"
+    assert out.pending_action is None
     assert b.last_query == "what is this?"
     assert b.last_frame == b"PNGBYTES"

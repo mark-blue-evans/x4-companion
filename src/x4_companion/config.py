@@ -24,9 +24,9 @@ class BrainConfig:
     default: str = "openai"
     model: str = "MiniMax-M2.7"
     openai_model: str = "gpt-5-nano"
-    openai_reasoning_effort: str = "minimal"
+    openai_reasoning_effort: str = "low"
     image_understanding: bool = True
-    history_turns: int = 6
+    history_turns: int = 12
     web_search: bool = False
 
 @dataclass
