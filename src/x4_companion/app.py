@@ -64,18 +64,24 @@ class App:
 
         self._loop = asyncio.new_event_loop()
         self._loop_thread = threading.Thread(target=self._run_loop, daemon=True)
+        self._busy = False
 
     def _run_loop(self) -> None:
         asyncio.set_event_loop(self._loop)
         self._loop.run_forever()
 
     def _on_ptt_down(self) -> None:
+        if self._busy:
+            self.bridge.show_text.emit("(still thinking...)")
+            return
         try:
             self.recorder.start()
         except Exception as e:
             self.bridge.show_text.emit(f"(mic error: {e})")
 
     def _on_ptt_up(self) -> None:
+        if self._busy:
+            return
         try:
             wav = self.recorder.stop()
         except Exception as e:
@@ -86,31 +92,35 @@ class App:
         except Exception as e:
             self.bridge.show_text.emit(f"(capture failed: {e})")
             return
+        self._busy = True
         asyncio.run_coroutine_threadsafe(self._handle_turn(wav, frame), self._loop)
 
     async def _handle_turn(self, wav: bytes, frame: bytes) -> None:
-        if not wav or len(wav) < 4000:
-            self.bridge.show_text.emit("(didn't catch that)")
-            return
         try:
-            transcript = await self.stt.transcribe(wav)
-        except Exception as e:
-            self.bridge.show_text.emit(f"(stt error: {e})")
-            return
-        if not transcript.strip():
-            self.bridge.show_text.emit("(didn't catch that)")
-            return
-        try:
-            reply = await self.brain.answer(frame, transcript)
-        except Exception as e:
-            self.bridge.show_text.emit(f"(brain error: {e})")
-            return
-        self.bridge.show_text.emit(reply)
-        try:
-            audio = await self.tts.synthesize(reply)
-            self.player.play(audio)
-        except Exception:
-            pass
+            if not wav or len(wav) < 4000:
+                self.bridge.show_text.emit("(didn't catch that)")
+                return
+            try:
+                transcript = await self.stt.transcribe(wav)
+            except Exception as e:
+                self.bridge.show_text.emit(f"(stt error: {e})")
+                return
+            if not transcript.strip():
+                self.bridge.show_text.emit("(didn't catch that)")
+                return
+            try:
+                reply = await self.brain.answer(frame, transcript)
+            except Exception as e:
+                self.bridge.show_text.emit(f"(brain error: {e})")
+                return
+            self.bridge.show_text.emit(reply)
+            try:
+                audio = await self.tts.synthesize(reply)
+                await asyncio.get_event_loop().run_in_executor(None, self.player.play, audio)
+            except Exception:
+                pass
+        finally:
+            self._busy = False
 
     def run(self) -> int:
         self._loop_thread.start()
@@ -123,6 +133,14 @@ class App:
             self.hotkey.stop()
         except Exception:
             pass
+        for client in (self.brain, self.tts):
+            aclose = getattr(client, "aclose", None)
+            if aclose is None:
+                continue
+            try:
+                asyncio.run_coroutine_threadsafe(aclose(), self._loop).result(timeout=5)
+            except Exception:
+                pass
         self._loop.call_soon_threadsafe(self._loop.stop)
 
 

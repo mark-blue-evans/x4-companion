@@ -16,12 +16,24 @@ class Hotkey:
 
     def start(self) -> None:
         import keyboard
-        keyboard.on_press_key(self._key, lambda _e: self._handle_down())
-        keyboard.on_release_key(self._key, lambda _e: self._handle_up())
+        self._press_handle = keyboard.on_press_key(
+            self._key, lambda _e: self._handle_down()
+        )
+        self._release_handle = keyboard.on_release_key(
+            self._key, lambda _e: self._handle_up()
+        )
 
     def stop(self) -> None:
         import keyboard
-        keyboard.unhook_all()
+        for handle in (
+            getattr(self, "_press_handle", None),
+            getattr(self, "_release_handle", None),
+        ):
+            if handle is not None:
+                try:
+                    keyboard.unhook(handle)
+                except Exception:
+                    pass
 
     def _handle_down(self) -> None:
         if self._pressed:

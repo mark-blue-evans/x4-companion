@@ -27,6 +27,9 @@ class DeepgramTTS(TTS):
         r.raise_for_status()
         return r.content
 
+    async def aclose(self) -> None:
+        await self._client.aclose()
+
 class StubTTS(TTS):
     async def synthesize(self, text: str) -> bytes:
         return b"PCM_FAKE"
