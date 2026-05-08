@@ -35,3 +35,29 @@ async def test_minimax_brain_includes_history_in_followup():
     assert "q1" in last_body
     assert "first" in last_body
     assert "q2" in last_body
+
+
+@pytest.mark.asyncio
+@respx.mock
+async def test_minimax_brain_injects_vkb_bindings_when_provided():
+    respx.post("https://api.minimax.io/v1/text/chatcompletion_v2").mock(
+        return_value=Response(200, json={"choices": [{"message": {"content": "ok"}}]})
+    )
+    bindings = "A4 HAT Press -- Deselects target"
+    brain = MiniMaxBrain(api_key="mm-test", vkb_bindings=bindings)
+    await brain.answer(b"P", "how do I deselect?")
+    body = respx.calls.last.request.read().decode()
+    assert "VKB Gladiator" in body
+    assert "Deselects target" in body
+
+
+@pytest.mark.asyncio
+@respx.mock
+async def test_minimax_brain_omits_vkb_section_when_not_provided():
+    respx.post("https://api.minimax.io/v1/text/chatcompletion_v2").mock(
+        return_value=Response(200, json={"choices": [{"message": {"content": "ok"}}]})
+    )
+    brain = MiniMaxBrain(api_key="mm-test")
+    await brain.answer(b"P", "anything")
+    body = respx.calls.last.request.read().decode()
+    assert "VKB" not in body

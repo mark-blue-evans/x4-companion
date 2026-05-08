@@ -1,6 +1,8 @@
 import asyncio
+import os
 import sys
 import threading
+from pathlib import Path
 
 from PySide6.QtCore import QObject, Signal
 from PySide6.QtWidgets import QApplication
@@ -15,6 +17,26 @@ from .overlay import Overlay
 from .stt import STT, DeepgramSTT
 from .tray import Tray
 from .tts import TTS, DeepgramTTS
+
+VKB_BINDINGS_PATH = Path(__file__).parent / "data" / "vkb_bindings.md"
+
+
+def _load_dotenv(path: Path) -> None:
+    """Minimal .env loader. Existing env vars take precedence."""
+    if not path.exists():
+        return
+    for line in path.read_text().splitlines():
+        line = line.strip()
+        if not line or line.startswith("#") or "=" not in line:
+            continue
+        key, _, value = line.partition("=")
+        os.environ.setdefault(key.strip(), value.strip().strip("'\""))
+
+
+def _load_vkb_bindings() -> str | None:
+    if not VKB_BINDINGS_PATH.exists():
+        return None
+    return VKB_BINDINGS_PATH.read_text()
 
 
 class _Bridge(QObject):
@@ -145,10 +167,11 @@ class App:
 
 
 def main() -> int:
+    _load_dotenv(Path.cwd() / ".env")
     cfg = load_config()
     if not cfg.secrets.minimax_api_key or not cfg.secrets.deepgram_api_key:
         print(
-            "Set MINIMAX_API_KEY and DEEPGRAM_API_KEY environment variables.",
+            "Set MINIMAX_API_KEY and DEEPGRAM_API_KEY (system env vars or .env file).",
             file=sys.stderr,
         )
         return 1
@@ -157,6 +180,7 @@ def main() -> int:
         api_key=cfg.secrets.minimax_api_key,
         model=cfg.brain.model,
         history_turns=cfg.brain.history_turns,
+        vkb_bindings=_load_vkb_bindings(),
     )
     stt = DeepgramSTT(api_key=cfg.secrets.deepgram_api_key)
     tts = DeepgramTTS(
